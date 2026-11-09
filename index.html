@@ -22,6 +22,19 @@ const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
 const cakeVideo=document.createElement('video');cakeVideo.muted=true;cakeVideo.loop=true;cakeVideo.playsInline=true;cakeVideo.preload='auto';cakeVideo.setAttribute('webkit-playsinline','');cakeVideo.setAttribute('x5-playsinline','');cakeVideo.src=window.BIRTHDAY_ASSETS.cake;
 const nebula=new Image();nebula.src=window.BIRTHDAY_ASSETS.nebula;
 const skyNebula=new Image();skyNebula.src=window.BIRTHDAY_ASSETS.sky;
+const cakeLayer=document.createElement('canvas');cakeLayer.width=840;cakeLayer.height=852;
+const cakeGL=cakeLayer.getContext('webgl',{alpha:true,premultipliedAlpha:true,antialias:false,depth:false,stencil:false});
+let cakeTexture,cakeFrame=-1;
+if(cakeGL){
+ const shader=(type,source)=>{const s=cakeGL.createShader(type);cakeGL.shaderSource(s,source);cakeGL.compileShader(s);if(!cakeGL.getShaderParameter(s,cakeGL.COMPILE_STATUS))throw new Error(cakeGL.getShaderInfoLog(s));return s;};
+ const program=cakeGL.createProgram();
+ cakeGL.attachShader(program,shader(cakeGL.VERTEX_SHADER,'attribute vec2 position;varying vec2 uv;void main(){uv=(position+1.0)*0.5;gl_Position=vec4(position,0.0,1.0);}'));
+ cakeGL.attachShader(program,shader(cakeGL.FRAGMENT_SHADER,'precision mediump float;uniform sampler2D footage;varying vec2 uv;void main(){vec3 color=texture2D(footage,uv).rgb;float light=max(color.r,max(color.g,color.b));float solid=smoothstep(0.23,0.25,uv.x)*(1.0-smoothstep(0.72,0.75,uv.x))*smoothstep(0.035,0.055,uv.y)*(1.0-smoothstep(0.51,0.54,uv.y));float alpha=mix(light,max(light,smoothstep(0.012,0.12,light)),solid);gl_FragColor=vec4(color,alpha);}'));
+ cakeGL.linkProgram(program);cakeGL.useProgram(program);
+ const buffer=cakeGL.createBuffer();cakeGL.bindBuffer(cakeGL.ARRAY_BUFFER,buffer);cakeGL.bufferData(cakeGL.ARRAY_BUFFER,new Float32Array([-1,-1,1,-1,-1,1,-1,1,1,-1,1,1]),cakeGL.STATIC_DRAW);
+ const position=cakeGL.getAttribLocation(program,'position');cakeGL.enableVertexAttribArray(position);cakeGL.vertexAttribPointer(position,2,cakeGL.FLOAT,false,0,0);
+ cakeTexture=cakeGL.createTexture();cakeGL.bindTexture(cakeGL.TEXTURE_2D,cakeTexture);cakeGL.texParameteri(cakeGL.TEXTURE_2D,cakeGL.TEXTURE_MIN_FILTER,cakeGL.LINEAR);cakeGL.texParameteri(cakeGL.TEXTURE_2D,cakeGL.TEXTURE_MAG_FILTER,cakeGL.LINEAR);cakeGL.texParameteri(cakeGL.TEXTURE_2D,cakeGL.TEXTURE_WRAP_S,cakeGL.CLAMP_TO_EDGE);cakeGL.texParameteri(cakeGL.TEXTURE_2D,cakeGL.TEXTURE_WRAP_T,cakeGL.CLAMP_TO_EDGE);cakeGL.pixelStorei(cakeGL.UNPACK_FLIP_Y_WEBGL,true);
+}
 let width=innerWidth,height=innerHeight,dpr=Math.min(devicePixelRatio,2),elapsed=0,last=0,lastTitle=0,started=false,paused=false,lit=true,cakeLayout;
 const renderGaps=[],videoGaps=[];let lastVideoFrame=0,renderCount=0;
 let seed=1989;
@@ -83,13 +96,14 @@ function drawWords(t){
 function drawCake(){
  const {scale,x,y}=cakeLayout;
  ctx.save();ctx.translate(x,y);ctx.scale(scale,scale);
- // The opaque cake silhouette masks the lettering behind the original footage.
- ctx.fillStyle='#000';ctx.beginPath();ctx.ellipse(275,491,134,43,0,0,6.28);ctx.fill();
- ctx.beginPath();ctx.moveTo(179,294);ctx.lineTo(373,294);ctx.lineTo(373,491);ctx.bezierCurveTo(373,515,179,515,179,491);ctx.closePath();ctx.fill();
- ctx.beginPath();ctx.ellipse(276,294,98,25,0,0,6.28);ctx.fill();ctx.fillRect(271,234,7,65);
- ctx.globalCompositeOperation='screen';
  if(!lit){ctx.beginPath();ctx.rect(0,0,560,568);ctx.ellipse(275,184,53,54,0,0,Math.PI*2);ctx.clip('evenodd');}
- if(cakeVideo.readyState>=2)ctx.drawImage(cakeVideo,0,0,560,568);
+ if(cakeVideo.readyState>=2){
+  if(cakeGL){
+   // Extract transparency from the actual frame, preserving its antialiased edges.
+   if(cakeFrame!==cakeVideo.currentTime){cakeGL.bindTexture(cakeGL.TEXTURE_2D,cakeTexture);cakeGL.texImage2D(cakeGL.TEXTURE_2D,0,cakeGL.RGBA,cakeGL.RGBA,cakeGL.UNSIGNED_BYTE,cakeVideo);cakeFrame=cakeVideo.currentTime;}
+   cakeGL.drawArrays(cakeGL.TRIANGLES,0,6);ctx.drawImage(cakeLayer,0,0,560,568);
+  }else{ctx.globalCompositeOperation='screen';ctx.drawImage(cakeVideo,0,0,560,568);}
+ }
  ctx.restore();
 }
 function frame(now){requestAnimationFrame(frame);if(document.hidden){last=0;return;}const gap=last?now-last:0;const dt=last?Math.min(gap,100)/1000:0;last=now;if(!paused)elapsed+=dt;if(started&&!paused&&gap){renderGaps.push(gap);if(renderGaps.length>900)renderGaps.shift();renderCount++;}
